@@ -2,13 +2,15 @@ library(sequenza)
 options = commandArgs(trailingOnly = TRUE)
 
 name=options[1]
+chrpref=options[2]
+female=as.logical(options[3])
 #name="GH3Z.seqz.gz" ##To change in the final version
 id=sub(pattern=".seqz.gz",replacement="",x=name)
 outdir=paste0(id,"_sequenza/")
 id=basename(id)
 
 dir.create(outdir)
-ncores=as.numeric(options[2])
+ncores=as.numeric(options[4])
 
 mydataplotgc=read.seqz(name) ##This takes like 3 min
 gcstats=gc.norm(x = mydataplotgc$depth.ratio, gc = mydataplotgc$GC.percent)
@@ -23,15 +25,15 @@ legend('topright', legend = colnames(gcstats$raw), pch = c(1, 19, 1))
 hist2(mydataplotgc$depth.ratio, mydataplotgc$adjusted.ratio, breaks = prettyLog, key = vkey, panel.first = abline(0, 1, lty = 2), xlab = 'Uncorrected depth ratio', ylab = 'GC-adjusted depth ratio')
 dev.off()
 
-chromosomes=c(seq(1,23),"X","Y")
-mydata=sequenza.extract(file=name,chromosome.list=chromosomes) ##I am excluding the GL "chromosomes" and the mitocondria since they generate an error in sequenza
+chromosomes=paste0(chrpref,c(seq(1,22),"X","Y"))
+mydata=sequenza.extract(file=name,chromosome.list=chromosomes,min.reads.baf=10) ##I am excluding the GL "chromosomes" and the mitocondria since they generate an error in sequenza ##Only considering positions with at least 10 mapped reads
 
-for (chr in 1:length(chromosomes)) {
-chromosome=chromosomes[chr]
-pdf(paste0(outdir,"chromosome",chromosomes[chromosome],"_view.pdf"))
-try(chromosome.view(mut.tab = mydata$mutations[[chromosome]], baf.windows = mydata$BAF[[chromosome]], ratio.windows = mydata$ratio[[chromosome]], min.N.ratio = 1, segments = mydata$segments[[chromosome]], main = mydata$chromosomes[chromosome]))
-dev.off()
-}
+#for (chr in 1:length(chromosomes)) {
+#  chromosome=chromosomes[chr]
+#  pdf(paste0(outdir,"chromosome",chromosomes[chromosome],"_view.pdf"))
+#  try(chromosome.view(mut.tab = mydata$mutations[[chromosome]], baf.windows = mydata$BAF[[chromosome]], ratio.windows = mydata$ratio[[chromosome]], min.N.ratio = 1, segments = mydata$segments[[chromosome]], main = mydata$chromosomes[chromosome]))
+#  dev.off()
+#}
 
-cp <- sequenza.fit(mydata,mc.cores=ncores,chromosome.list=chromosomes)
-sequenza.results(mydata,cp.table=cp,female=FALSE,sample.id=id,out.dir=outdir,chromosome.list=chromosomes)
+cp <- sequenza.fit(mydata,mc.cores=ncores,chromosome.list=chromosomes,female=female, XY=c(X=paste0(chrpref,"X"),Y=paste0(chrpref,"Y")))
+sequenza.results(mydata,cp.table=cp,female=female,sample.id=id,out.dir=outdir,chromosome.list=chromosomes,XY=c(X=paste0(chrpref,"X"),Y=paste0(chrpref,"Y")))

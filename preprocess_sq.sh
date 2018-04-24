@@ -16,7 +16,8 @@ fi
 
 mkdir -p $3
 
-gcfile="$(dirname $HUMAN_GENOME)/b37.gc50Base.txt.gz"
+#gcfile=$(echo $(dirname $HUMAN_GENOME)/*gc*Base.txt.gz | xargs ls )
+gcfile=$(echo $(dirname $HUMAN_GENOME)/*gc*Base.lite.txt.gz | xargs ls )
 dir=$3
 outname=$(basename $dir)
 
