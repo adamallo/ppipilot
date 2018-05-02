@@ -70,7 +70,8 @@ fi
 
 if [[ ! -s ${runname}.bam ]] && [[ ! -s ${runname}_markadapters.bam ]]
 then
-    java -Xms512m -Xmx8G -jar $PICARDJAR MarkIlluminaAdapters I=${runname}_unaligned.bam O=${runname}_markadapters.bam M=${runname}_markadapters.metrics TMP_DIR=$TMP_DIR #TMP_DIR optional to process large files
+    mkdir -p qc_$runname/markadapters
+    java -Xms512m -Xmx8G -jar $PICARDJAR MarkIlluminaAdapters I=${runname}_unaligned.bam O=${runname}_markadapters.bam M=qc_$runname/markadapters/${runname}_markadapters.metrics TMP_DIR=$TMP_DIR #TMP_DIR optional to process large files
 fi
 
 #Piped: generates modified fastq from the previous bam, aligns them to the reference genome and adds back the lost information from the original bam file (also modifies some alignments, making primary those that are not chimeric if there are several options). The resulting bam is standard
