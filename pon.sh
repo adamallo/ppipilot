@@ -18,4 +18,4 @@ do
     vcfs=$vcfs" -vcfs "$i
 done
 
-eval "gatk CreateSomaticPanelOfNormals$vcfs -O pon.vcf.gz" #this is supposed to be insecure
+gatk CreateSomaticPanelOfNormals$vcfs -O pon.vcf.gz

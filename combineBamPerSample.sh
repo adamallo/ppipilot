@@ -7,7 +7,7 @@ set -o pipefail
 
 submit="submit"
 
-usage="$0 sampledir umi\n umi: binary flag, 1 includes a 8bp UMI, 0 no UMI "
+usage="$0 sampledir umi [bed]\n umi: binary flag, 1 includes a 8bp UMI, 0 no UMI "
 umi=1
 
 
@@ -16,7 +16,7 @@ UMIminMAPQ=50 ###Filtering for UMI calling (In the IDT manual they use 10, the d
 UMIminPHRED=20 ###Filtering for UMI calling (In the IDT manual they use 30, the default is 10). This info cannot be recovered from consensus reads. However, it is less important than UMIminMAPQ since even if we include bases with low quality they should be "consensed out" if we have enough number of reads comming from the same molecule and these phreds are taking into consideration to calculate the phred score of the consensus position.
 UMIminreads=1 ###I can filter them a posteriori, doing it here just improves computation time, but I do not think it is worth losing data considering low coverage in some samples
 
-if [[ $# -ne 2 ]] || [[ ! -d $1 ]]
+if [[ $# -lt 2 ]] || [[ ! -d $1 ]]
 then
     echo -e $usage
     exit 1
@@ -25,6 +25,13 @@ fi
 sampledir=$1
 sample=$(basename $sampledir)
 umi=$2
+
+bed=""
+
+if [[ $# -gt 2 ]] && [[ -s $3 ]]
+then
+    bed=$(readlink -e $3)
+fi
 
 if [[ "$SLURM_CPUS_PER_TASK" == "" ]]
 then
@@ -124,6 +131,7 @@ then
         $submit $scriptdir/bamqc.sh ${sample}.bam 
         $submit $scriptdir/fastqc.sh ${sample}.bam
         $submit $scriptdir/flagstat.sh ${sample}.bam
+        $submit $scriptdir/depth.sh ${sample}.bam $bed 0
         $submit $scriptdir/duplexmetrics.sh ${sample}_grouped.bam qc_$sample/duplex_metric $sample 0 ##I may want to switch this to 1, but I may also want the input file?
         
         if [[ -s "$sample.bam" ]]
@@ -159,7 +167,16 @@ else
             java -Xmx8G -jar $PICARDJAR MergeSamFiles ${inputlist}O=${sample}_merged.bam USE_THREADING=True SORT_ORDER=queryname
         fi
 
-        java -Xmx8G -jar $PICARDJAR MarkDuplicates I=${sample}_merged.bam O=/dev/stdout M=${sample}_markduplicates.metrics CREATE_INDEX=false TMP_DIR=$TMP_DIR | sambamba sort -t $SLURM_CPUS_PER_TASK -m $(($SLURM_MEM_PER_CPU*$SLURM_CPUS_PER_TASK-8192))M -o ${sample}.bam /dev/stdin
+        if [[ ! -s ${sample}.bam ]]
+        then
+            java -Xmx8G -jar $PICARDJAR MarkDuplicates I=${sample}_merged.bam O=/dev/stdout M=${sample}_markduplicates.metrics CREATE_INDEX=false TMP_DIR=$TMP_DIR | sambamba sort -t $SLURM_CPUS_PER_TASK -m $(($SLURM_MEM_PER_CPU*$SLURM_CPUS_PER_TASK-8192))M -o ${sample}.bam /dev/stdin
+
+            $submit $scriptdir/bamqc.sh ${sample}.bam 
+            $submit $scriptdir/fastqc.sh ${sample}.bam
+            $submit $scriptdir/flagstat.sh ${sample}.bam
+            $submit $scriptdir/depth.sh ${sample}.bam $bed 0
+            $submit $scriptdir/depth.sh ${sample}.bam $bed 1
+        fi
         
         if [[ -s $sample.bam ]]
         then

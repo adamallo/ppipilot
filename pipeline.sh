@@ -1,8 +1,8 @@
 #!/bin/bash
 scriptdir=/home/dmalload/ppipilot/scripts
-usage="$0 fastqdir parentdir umi\n fastqdir: directory with fastqfiles\nparentdir: directory in which new directories for each case will be generated\n umi: binary flag indicating whether reads have 8-bp UMIs or not\n"
+usage="$0 fastqdir parentdir umi [bed]\n fastqdir: directory with fastqfiles\nparentdir: directory in which new directories for each case will be generated\n umi: binary flag indicating whether reads have 8-bp UMIs or not\n"
 
-if [[ $# -ne 3 ]] || [[ $1 == "-h" ]] || [[ $1 == "--help" ]] || [[ ! -d $1 ]]
+if [[ $# -lt 3 ]] || [[ $1 == "-h" ]] || [[ $1 == "--help" ]] || [[ ! -d $1 ]]
 then
     echo -e $usage
     exit
@@ -15,6 +15,13 @@ fastqdir=$1
 umi=$3
 depsep=":"
 dependency="--dependency=afterok:"
+
+bed=""
+
+if [[ $# -gt 3 ]] && [[ -s $4 ]]
+then
+    bed=$(readlink -e $4)
+fi
 
 #Example of fastq file naming format
 #H_ZT-591-3-lib1_S14_L002_I1_001.fastq.gz
@@ -56,5 +63,20 @@ for casename in "${casedirs[@]}"
 do
     casedir=$basedir/$casename
     echo "Submitting combineBamPerSample job for sample $casename with dependency" ${jobs["$casename"]}
-    job=$(submit -c 8 ${jobs["$casename"]} $scriptdir/combineBamPerSample.sh $casedir $umi | sed "s/Queued job \([0-9]\+\)/\1/") 
+    job=$(submit -c 8 ${jobs["$casename"]} $scriptdir/combineBamPerSample.sh $casedir $umi $bed | sed "s/Queued job \([0-9]\+\)/\1/") 
+    
+    #launchpileupsummaries depends on job
+    #need to store this jobs by pair
+
 done
+
+#PON depends on all jobs of casenames that are normal
+
+##SNV
+#foreach pair
+#makecontamination depends on launchpileupsummaries of pair
+#makemutect2 depends on PON and launchcontamination
+#filtercalls depends on makemutect2
+
+
+##CNV

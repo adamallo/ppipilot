@@ -15,9 +15,9 @@ mkdir -p $outputdir
 while read name tumor normal
 do
     normal=$(readlink -e $normal)
-    normal=$normal"_mdups_pileup.table"
+    normal=$normal"_pileup.table"
     tumor=$(readlink -e $tumor)
-    tumor=$tumor"_mdups_pileup.table"
+    tumor=$tumor"_pileup.table"
     mkdir -p $outputdir/$name
     dir=$(readlink -e $outputdir/$name)
     echo "Submitting case $name. Results in $dir"
