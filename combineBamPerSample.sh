@@ -131,7 +131,7 @@ then
         $submit $scriptdir/bamqc.sh ${sample}.bam 
         $submit $scriptdir/fastqc.sh ${sample}.bam
         $submit $scriptdir/flagstat.sh ${sample}.bam
-        $submit $scriptdir/depth.sh ${sample}.bam $bed 0
+        $submit $scriptdir/depth_hist.sh ${sample}.bam $bed 0
         $submit $scriptdir/duplexmetrics.sh ${sample}_grouped.bam qc_$sample/duplex_metric $sample 0 ##I may want to switch this to 1, but I may also want the input file?
         
         if [[ -s "$sample.bam" ]]
@@ -174,8 +174,8 @@ else
             $submit $scriptdir/bamqc.sh ${sample}.bam 
             $submit $scriptdir/fastqc.sh ${sample}.bam
             $submit $scriptdir/flagstat.sh ${sample}.bam
-            $submit $scriptdir/depth.sh ${sample}.bam $bed 0
-            $submit $scriptdir/depth.sh ${sample}.bam $bed 1
+            $submit $scriptdir/depth_hist.sh ${sample}.bam $bed 0
+            $submit $scriptdir/depth_hist.sh ${sample}.bam $bed 1
         fi
         
         if [[ -s $sample.bam ]]
