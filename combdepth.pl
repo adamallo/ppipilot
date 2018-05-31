@@ -12,7 +12,9 @@ use List::Util qw(min sum);
 
 ## Conf
 ############
-my $MAX_IT=200; ##Increase this if working with contings/scaffolds instead of chromosomes
+#my $MAX_IT=200000;
+my $MAX_IT=4000000000;
+#my $MAX_IT=200; ##Increase this if working with contings/scaffolds instead of chromosomes
 
 ## Getopt I/O
 #############
@@ -78,23 +80,17 @@ my @cpos; #Integer, pos in the current chromosome in the file i
 my @cdepth; #Integer, depth in the current pos in the current chrom in the file i
 my @cnewchr; #Bool, file i is situated in a new chromosome
 
-# Slice variables. Arrays with the index of files that have the current chr or pos. Used to function as masks (from a functional perspective)
-#my @chrslice;
-#my @posslice;
-#my @validfilesslice;
-#my @nextvalidfilesslice;
-
 # Mask variables. Arrays with booleans in the index of files that have the current chr or pos. Array-based masks
-my @chrmask;
-my @posmask;
-my @posvalidfilesmask;
-my @validfilesmask;
-my @nextvalidfilesmask;
+my @chrmask=(1) x $nfiles; #Initially we assume all samples are valid for chromosome and position
+my @posmask=@chrmask;
+my @posvalidfilesmask=@chrmask;
+my @validfilesmask=@chrmask;
 
 # Control variables
 my $stop=0;
 $i=0;
 my $j=0;
+my $n=0;
 my $chr=1;
 my $pos=0;
 my $ifilt=0;
@@ -106,8 +102,6 @@ my $npassthisfilter=0;
 my $line;
 my @results;
 
-##Initialization rutines
-
 #Results init
 for ($i=0; $i <= $nfiles; ++$i)
 {
@@ -117,81 +111,85 @@ for ($i=0; $i <= $nfiles; ++$i)
 	}
 }
 
-#Loading first data point
-for (my $nfile=0; $nfile<$nfiles; ++$nfile)
-{
-	$line=$files[$nfile]->getline();
-	chomp($line);
-	($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
-	#print("DEBUG: chr=$cchr[$nfile], pos=$cpos[$nfile], depth=$cdepth[$nfile]\n");
-}
-
 $i=0;
 
 ##Main loop that gets new chromosomes until the end of all files or an iterator limit (to avoid infinite loops with a while)
 while (!($stop == 1 || $i>=$MAX_IT))
 {
+	#Loading data from the files that is necessary
+	#$pos=getnext(@posvalidfilesmask); #Equivalent, but a little slower
+	for (my $nfile=0; $nfile<$nfiles; ++$nfile)
+	{
+		if ($posvalidfilesmask[$nfile]==1)
+		{
+			$line=$files[$nfile]->getline();
+			chomp($line);
+			($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
+		}
+	}
 	$pos=min(@cpos);
 
-	#@chrslice=makeslice(\@cchr,$chr);
-	#scalar @chrslice or die "Different chromosomes not implemented yet\n";
-	#@chrmask=makemask(\@cchr,\@chrslice);
-
-	@chrmask=makemask(\@cchr,$chr);
+	#@chrmask=makemask(\@cchr,$chr);#Equivalent, but a little slower
+	@chrmask=(0) x $nfiles;	
+	for ($j=0; $j<$nfiles; ++$j)
+	{
+		if($cchr[$j]==$chr)
+		{
+			$chrmask[$j]=1;
+		}
+	}	
 	sum @chrmask or die "Different chromosomes not implemented yet\n";
 
-	#@posslice=makeslice(\@cpos,$pos);
-	#scalar @posslice or die "None of the files contains this position, still implementing this\n";
-	#@posmask=makemask(\@cpos,\@posslice);
-	
-	@posmask=makemask(\@cpos,$pos);
+	#@posmask=makemask(\@cpos,$pos);#Equivalent, but a little slower
+	@posmask=(0) x $nfiles;	
+	for ($j=0; $j<$nfiles; ++$j)
+	{
+		if($cpos[$j]==$pos)
+		{
+			$posmask[$j]=1;
+		}
+	}
 	sum @posmask or die "None of the files contains this position, still implementing this\n";
 	
-	@validfilesmask=arrayfunc(\@posmask, \&vand, \@chrmask);
-	@posvalidfilesmask=@validfilesmask;
-	@nextvalidfilesmask=@validfilesmask;
+	#@posvalidfilesmask=arrayfunc(\@posmask, \&vand, \@chrmask);
+	#Equivalent, but this way is a little faster (although less beautiful)
+	for ($j=0; $j<$nfiles; ++$j)
+	{
+		$posvalidfilesmask[$j]=$posmask[$j] & $chrmask[$j];
+	}
+	
+	@validfilesmask=@posvalidfilesmask;
 	$nvalidfiles=sum @validfilesmask;
-
-	#@validfilesslice=makeslice(\@validfilesmask,1);	
-	#$nvalidfiles=scalar @validfilesslice;
-	#@nextvalidfilesslice=();
 
 	for ($ifilt=0; $ifilt< scalar @filters; ++$ifilt) #desired depth
 	{
-		$npassthisfilter=0;
+		$npassthisfilter=0; #number of samples that pass this filter
+
 		for($isample=0; $isample<$nvalidfiles; ++$isample)
 		{
-			if($validfilesmask[$isample]==1)
+			if($validfilesmask[$isample]==1) #Sample that is not masked out
 			{
-				if($cdepth[$isample]>=$filters[$ifilt])
-				{
-		#foreach $isample (@validfilesslice) #numberid of valid samples in this position ##TODO: I may need to evaluate if I should use masks with ifs or slices with the push to generate the nextslice. Which one will be quicker?
-		#{
-		#if($cdepth[$isample]>=$filters[$ifilt])
-		#{
-		#push(@nextvalidfiles,$isample); #this sample has enough coverage at this level and should be checked at the next
-				
+				if($cdepth[$isample]>=$filters[$ifilt]) #Depth comparison
+				{	
 					++$npassthisfilter;
 				}
 				else
 				{
-					$nextvalidfilesmask[$isample]=0; #this sample does not have enough coverage at this level and therefore it does not need to be checked again for this position
+					$validfilesmask[$isample]=0; #this sample does not have enough coverage at this level and therefore it does not need to be checked again for this position
 					--$nvalidfiles;
 				}
 			}
 		}
-		++$results[$npassthisfilter][$ifilt];
-		
-		#@validfilesslice=@nextvalidfilesslice; #we discard the files that did not meet this filtering level
-		#$nvalidfiles=scalar @nextvalidfilesslice;
-		#@nextvalidfilesslice=();
-		@validfilesmask=@nextvalidfilesmask;
+		for ($j=1; $j<=$npassthisfilter; ++$j)
+		{
+			++$results[$j][$ifilt]; #Results for this position
+		}
+	}	
+	if ($i%100000 == 0)
+	{
+		print("Iteraction number $i, CHR $chr, POS $pos\n");
 	}
-		
-		
-	#updatepos();	
 	++$i;
-	last;
 }
 
 # Print results
@@ -204,10 +202,7 @@ push(@header,">=$_") foreach @filters;
 print(join(",","Sharedby",@header),"\n");
 for ($i=1; $i <= $nfiles; ++$i)
 {
-	for ($j=0; $j< scalar @filters; ++$j)
-	{
-		print(join(",",$i,@{$results[$i]}),"\n");
-	}
+	print(join(",",$i,@{$results[$i]}),"\n");
 }
 
 ## Functions
@@ -262,22 +257,20 @@ sub vor
 		return $_[0] | $_[1];
 	}	
 }
-#sub makeslice
-#{
-#	my @out;
-#	for (my $i=0; $i<$nfiles; ++$i)
-#	{
-#		if(${$_[0]}[$i]==$_[1])
-#		{
-#			push(@out,$i);
-#		}
-#	}
-#	return @out;
-#}
-#
-#sub makemask
-#{
-#	my @mask=(0) x scalar @{$_[0]};
-#	@mask[@{$_[1]}]=(1) x scalar @{$_[1]};
-#	return @mask;
-#}
+
+sub getnext
+{
+	my @filemask=@_;
+
+	for (my $nfile=0; $nfile<$nfiles; ++$nfile)
+	{
+		if ($filemask[$nfile]==1)
+		{
+			$line=$files[$nfile]->getline();
+			chomp($line);
+			($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
+			#print("DEBUG: chr=$cchr[$nfile], pos=$cpos[$nfile], depth=$cdepth[$nfile]\n");
+		}
+	}
+	return min(@cpos);
+}	
