@@ -10,9 +10,63 @@ use IO::File;
 use List::Util qw(min sum);
 #use Data::Dumper;
 
+#Packages
+#########
+
+{
+	package slurplikeline;
+	use File::Slurp;
+	use IO::Uncompress::Gunzip qw(gunzip $GunzipError);
+
+	sub new 
+	{
+		my ($class,$filename,$mode) = @_;
+		my $n=0;
+		my $maxi=0;
+		my @lines;
+
+		if (defined $mode && lc $mode eq 'gz')
+		{
+			gunzip $filename => \@lines;
+		}
+		else
+		{
+			#@lines = read_file($filename); #Not working
+			my $filehandler;
+			open($filehandler,$filename);
+			@lines=<$filehandler>;
+			close($filehandler);
+		}
+
+		$maxi=scalar @lines;
+		
+		my $self = bless { 
+			filename => $filename,
+			n => $n,
+			lines => \@lines,
+			maxi => $maxi
+		},$class;
+
+		return $self;
+	}
+	
+	sub getline
+	{
+		my $self=shift;
+		
+		if ($self->{n} == $self->{maxi}){return undef};
+
+		++$self->{n};
+		return $self->{lines}->[$self->{n}-1];
+	}
+}
+
+
+
 ## Conf
 ############
-my $MAX_IT=4000000000;
+my $MAX_IT=400000;
+#my $MAX_IT=4000000000;
 
 ## Getopt I/O
 #############
@@ -26,8 +80,10 @@ my $ref="";
 my $dict="";
 my $listchrs="";
 my $help;
+my $slurp=0;
+my $yesall=0;
 
-my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv] --ref reference_genome.fa | --dict reference_genome.dict -o output_prefix [options]\nOptions: \n\t-l min \n\t-r max \n\t-b by \n\t--list list of chromosmes sorted in the same order as the input tsv files (to use instead of ref or dict)\nThis script takes as input the output of a number of \"samtools depth\" runs and calculates the number of common nucleotide positions at n= (max-min)/by depths in a range [min,max]. \n";
+my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv] --ref reference_genome.fa | --dict reference_genome.dict -o output_prefix [options]\nOptions: \n\t-l min \n\t-r max \n\t-b by \n\t-s read all files in memory (slurp). Much quicker but RAM intensive\n\t-y yes to all to use in combination with -s in non-interactive mode\n\t--list list of chromosmes sorted in the same order as the input tsv files (to use instead of ref or dict)\nThis script takes as input the output of a number of \"samtools depth\" runs and calculates the number of common nucleotide positions at n= (max-min)/by depths in a range [min,max]. \n";
 
 (! GetOptions(
 	'input|i=s{1,}' => \@inputfiles,
@@ -38,9 +94,23 @@ my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv
 	'ref=s' => \$ref,
 	'dict=s' => \$dict,
 	'list=s' => \$listchrs,
+	'slurp|s' => \$slurp,
+	'yesal|y' => \$yesall,
 	'help|h' => \$help,
 									)) or (($output_prefix eq "") || $help) and die $usage;
 
+
+# Measuring filesize and asking the user
+
+if ($slurp == 1 && $yesall ==0)
+{
+	my $filesize;
+	for (my $nfile=0; $nfile<scalar @inputfiles; ++$nfile)
+	{
+		$filesize+=-s $inputfiles[$nfile];
+	}
+	$slurp=prompt_yn("Are you sure that you want to slurp the files? This will use at least " . sprintf("%.2f",$filesize/1073741824) . "GB of RAM in your computer (it may be up to ".sprintf("%.2f",$filesize*6/1073741824)." GB if all files have been gzipped\n","n");
+}
 
 # Initializing filehandles
 my @files;
@@ -52,11 +122,26 @@ for (my $nfile=0; $nfile<scalar @inputfiles; ++$nfile)
 
 	if($inputfiles[$nfile] =~ /.gz$/)
 	{
-		$filehandle =  new IO::Uncompress::Gunzip $inputfiles[$nfile] or die "The file $inputfiles[$nfile] was detected as compressed with gzip, but it cannot be opened: $GunzipError\n";
+		if ($slurp == 1)
+		{
+			$filehandle = slurplikeline->new($inputfiles[$nfile],"gz") or die "Test";
+		}
+		else
+		{
+			$filehandle =  new IO::Uncompress::Gunzip $inputfiles[$nfile] or die "The file $inputfiles[$nfile] was detected as compressed with gzip, but it cannot be opened: $GunzipError\n";
+		}
 	}
 	else
 	{
-		$filehandle = IO::File->new($inputfiles[$nfile], "r") or die "The file $inputfiles[$nfile] was detected as a regular file, but it cannot be opened. Add the .gz extension if it has been compressed with gzip\n";
+		if ($slurp ==1)
+		{
+			$filehandle = slurplikeline->new($inputfiles[$nfile]) or die "Test";
+		}
+		else
+		{
+			$filehandle = IO::File->new($inputfiles[$nfile], 'r' ) or die "The file $inputfiles[$nfile] was detected as a regular file, but it cannot be opened. Add the .gz extension if it has been compressed with gzip\n";
+			
+		}
 	}
 	$files[$nfile]=$filehandle;
 }
@@ -385,4 +470,22 @@ sub getnext
 		}
 	}
 	return min(@cpos);
-}	
+}
+
+##By amon at https://stackoverflow.com/questions/18103501/prompting-multiple-questions-to-user-yes-no-file-name-input
+sub prompt {
+	my ($query) = @_; # take a prompt string as argument
+ 	local $| = 1; # activate autoflush to immediately show the prompt
+	print $query;
+	chomp(my $answer = <STDIN>);
+	return $answer;
+}
+
+##By Xtof at https://stackoverflow.com/questions/18103501/prompting-multiple-questions-to-user-yes-no-file-name-input
+sub prompt_yn {
+	my ($query, $default) = @_; 
+	my $default_yes = lc $default eq 'y';
+	my $yn = $default_yes ? "[Y/n]" : "[y/N]";
+	my $answer = lc prompt("$query $yn: "); 
+	return $default_yes ? ! ($answer =~ /^n/) : $answer =~ /^y/;
+}
