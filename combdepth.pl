@@ -12,9 +12,8 @@ use List::Util qw(min sum);
 
 ## Conf
 ############
-#my $MAX_IT=200000;
-my $MAX_IT=4000000000;
-#my $MAX_IT=200; ##Increase this if working with contings/scaffolds instead of chromosomes
+my $MAX_IT=200000;
+#my $MAX_IT=4000000000;
 
 ## Getopt I/O
 #############
@@ -24,9 +23,12 @@ my $output_prefix="";
 my $min=10;
 my $max=50;
 my $by=10;
+my $ref="";
+my $dict="";
+my $listchrs="";
 my $help;
 
-my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv] -l min -r max -b by -o output_prefix\n\nThis script takes as input the output of a number of \"samtools depth\" runs and calculates the number of common nucleotide positions at n= (max-min)/by depths in a range [min,max]\n";
+my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv] --ref reference_genome.fa | --dict reference_genome.dict -o output_prefix [options]\nOptions: \n\t-l min \n\t-r max \n\t-b by \n\t--list list of chromosmes sorted in the same order as the input tsv files (to use instead of ref or dict)\nThis script takes as input the output of a number of \"samtools depth\" runs and calculates the number of common nucleotide positions at n= (max-min)/by depths in a range [min,max]. \n";
 
 (! GetOptions(
 	'input|i=s{1,}' => \@inputfiles,
@@ -34,6 +36,9 @@ my $usage="Usage: $0 -i inputsample1.tsv [inputsample2.tsv ... inputtsamplen.tsv
 	'min|l=i' => \$min,
 	'max|r=i' => \$max,
 	'by|b=i' => \$by,
+	'ref=s' => \$ref,
+	'dict=s' => \$dict,
+	'list=s' => \$listchrs,
 	'help|h' => \$help,
 									)) or (($output_prefix eq "") || $help) and die $usage;
 
@@ -44,7 +49,7 @@ for (my $nfile=0; $nfile<scalar @inputfiles; ++$nfile)
 {
 	my $filehandle;
 
-	! -s $inputfiles[$nfile] and die "The input file $inputfiles[$nfile] is empty!\n";
+	! -s $inputfiles[$nfile] and die "The input file $inputfiles[$nfile] does not exist or it is empty!\n$usage";
 
 	if($inputfiles[$nfile] =~ /.gz$/)
 	{
@@ -56,6 +61,38 @@ for (my $nfile=0; $nfile<scalar @inputfiles; ++$nfile)
 	}
 	$files[$nfile]=$filehandle;
 }
+
+# Getting the list of chromosomes
+my @chrs;
+my %chrs;
+
+if ($ref ne "")
+{
+	$dict=$ref;
+	$dict=~s/\.fa/\.dict/;
+}
+if($dict ne "")
+{
+	open(my $filedict,$dict);
+	@chrs=grep(/\@SQ/,<$filedict>);
+	foreach my $ichr (@chrs)
+	{
+		$ichr=~s/\@SQ\tSN:([^\t]+).*/$1/g;
+	}
+	close($filedict);
+}
+elsif($listchrs ne "")
+{
+	open(my $filechrs,$listchrs);
+	@chrs=<$filechrs>;
+	close($filechrs);
+}
+else
+{
+	die "Invalid --ref, --dict and --listchrs options.\n$usage";
+}
+chomp(@chrs);
+@chrs{@chrs}=(0) x @chrs;
 
 # Initializing filters
 my @filters;
@@ -79,6 +116,7 @@ my @cchr; #Strings, name of the current chromosome in the file i
 my @cpos; #Integer, pos in the current chromosome in the file i
 my @cdepth; #Integer, depth in the current pos in the current chrom in the file i
 my @cnewchr; #Bool, file i is situated in a new chromosome
+my %ichrs;
 
 # Mask variables. Arrays with booleans in the index of files that have the current chr or pos. Array-based masks
 my @chrmask=(1) x $nfiles; #Initially we assume all samples are valid for chromosome and position
@@ -86,71 +124,94 @@ my @posmask=@chrmask;
 my @posvalidfilesmask=@chrmask;
 my @validfilesmask=@chrmask;
 
+# Content variables
+my $line;
+my @results;
+my @temp;
+
+#Results init
+for ($i=0; $i <= $nfiles; ++$i)
+{
+	for (my $j=0; $j< $nfilters; ++$j)
+	{
+		$results[$i][$j]=0;
+	}
+}
+
+#Obtaining the first line
+#$pos=getnext(@posvalidfilesmask); #Equivalent, but a little slower
+for (my $nfile=0; $nfile<$nfiles; ++$nfile)
+{
+	if ($posvalidfilesmask[$nfile]==1)
+	{
+		$line=$files[$nfile]->getline();
+		chomp($line);
+		($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
+	}
+}
+
 # Control variables
 my $stop=0;
 $i=0;
 my $j=0;
 my $n=0;
-my $chr=1;
+my $nchrs=0;
+my $nchr=0;
+my $chr=$chrs[$nchr];
 my $pos=0;
 my $ifilt=0;
 my $isample=0;
 my $nvalidfiles=0;
 my $npassthisfilter=0;
 
-# Content variables
-my $line;
-my @results;
-
-#Results init
-for ($i=0; $i <= $nfiles; ++$i)
+##Main loop that gets new positions until the end of all files or an iterator limit (to avoid infinite loops with a while)
+while (!($stop == $nfiles || $i>=$MAX_IT))
 {
-	for ($j=0; $j< $nfilters; ++$j)
+	#Check if the new positions are in this chr, if they are not, move to the next until they are
+	do
 	{
-		$results[$i][$j]=0;
-	}
-}
-
-$i=0;
-
-##Main loop that gets new chromosomes until the end of all files or an iterator limit (to avoid infinite loops with a while)
-while (!($stop == 1 || $i>=$MAX_IT))
-{
-	#Loading data from the files that is necessary
-	#$pos=getnext(@posvalidfilesmask); #Equivalent, but a little slower
-	for (my $nfile=0; $nfile<$nfiles; ++$nfile)
-	{
-		if ($posvalidfilesmask[$nfile]==1)
+		#Make chr mask and check how many samples still in this chr
+		#@chrmask=makemask(\@cchr,$chr);#Equivalent, but a little slower
+		@chrmask=(0) x $nfiles;	
+		for ($j=0; $j<$nfiles; ++$j)
 		{
-			$line=$files[$nfile]->getline();
-			chomp($line);
-			($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
+			if(defined $cchr[$j] and $cchr[$j] eq $chr)
+			{
+				$chrmask[$j]=1;
+			}
+		}
+		
+		$nchrs=sum(@chrmask);
+		
+		#If none, next chr
+		if($nchrs==0){++$nchr};
+
+		$nchr >= scalar @chrs and die "Unknown chromosomes present in the input files. Make sure that the input reference is the same you used to generate the bams you run with samtools depth\n";
+		$chr=$chrs[$nchr];
+	}
+	while($nchrs ==0);
+
+	#$pos=min(@cpos[makeslicefrommask(\@posvalidfilesmask)]); #Equivalent, but a little slower
+	@temp=();
+	for($j=0;$j<scalar $nfiles;++$j)
+	{
+		if($chrmask[$j]==1)
+		{
+			push(@temp,$j);
 		}
 	}
-	$pos=min(@cpos);
-
-	#@chrmask=makemask(\@cchr,$chr);#Equivalent, but a little slower
-	@chrmask=(0) x $nfiles;	
-	for ($j=0; $j<$nfiles; ++$j)
-	{
-		if($cchr[$j]==$chr)
-		{
-			$chrmask[$j]=1;
-		}
-	}	
-	sum @chrmask or die "Different chromosomes not implemented yet\n";
-
+	$pos=min(@cpos[@temp]);
+	
 	#@posmask=makemask(\@cpos,$pos);#Equivalent, but a little slower
 	@posmask=(0) x $nfiles;	
 	for ($j=0; $j<$nfiles; ++$j)
 	{
-		if($cpos[$j]==$pos)
+		if(defined $cpos[$j] and $cpos[$j] ==$pos)
 		{
 			$posmask[$j]=1;
 		}
 	}
-	sum @posmask or die "None of the files contains this position, still implementing this\n";
-	
+
 	#@posvalidfilesmask=arrayfunc(\@posmask, \&vand, \@chrmask);
 	#Equivalent, but this way is a little faster (although less beautiful)
 	for ($j=0; $j<$nfiles; ++$j)
@@ -159,13 +220,13 @@ while (!($stop == 1 || $i>=$MAX_IT))
 	}
 	
 	@validfilesmask=@posvalidfilesmask;
-	$nvalidfiles=sum @validfilesmask;
+	$nvalidfiles=sum(@validfilesmask);
 
 	for ($ifilt=0; $ifilt< scalar @filters; ++$ifilt) #desired depth
 	{
 		$npassthisfilter=0; #number of samples that pass this filter
 
-		for($isample=0; $isample<$nvalidfiles; ++$isample)
+		for($isample=0; $isample<$nfiles; ++$isample)
 		{
 			if($validfilesmask[$isample]==1) #Sample that is not masked out
 			{
@@ -185,7 +246,28 @@ while (!($stop == 1 || $i>=$MAX_IT))
 			++$results[$j][$ifilt]; #Results for this position
 		}
 	}	
-	if ($i%100000 == 0)
+	
+	#Loading data for the next iteration
+	#$pos=getnext(@posvalidfilesmask); #Equivalent, but a little slower
+	for (my $nfile=0; $nfile<$nfiles; ++$nfile)
+	{
+		if ($posvalidfilesmask[$nfile]==1)
+		{
+			$line=$files[$nfile]->getline();
+			if (defined $line)
+			{
+				chomp($line);
+				($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=split("\t",$line);
+			}
+			else
+			{
+				($cchr[$nfile],$cpos[$nfile],$cdepth[$nfile])=(undef) x 4;
+				++$stop;
+			}
+		}
+	}
+
+	if ($i%1000000 == 0)
 	{
 		print("Iteraction number $i, CHR $chr, POS $pos\n");
 	}
@@ -220,6 +302,21 @@ sub makemask
 		}
 	}
 	return @mask;
+}
+
+sub makeslicefrommask
+{
+	my @out;
+
+	for(my $i=0;$i<scalar @{$_[0]};++$i)
+	{
+		if($_[0]->[$i]==1)
+		{
+			push(@out,$i);
+		}
+	}
+
+	return @out;
 }
 
 sub arrayfunc
