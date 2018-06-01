@@ -12,8 +12,7 @@ use List::Util qw(min sum);
 
 ## Conf
 ############
-my $MAX_IT=200000;
-#my $MAX_IT=4000000000;
+my $MAX_IT=4000000000;
 
 ## Getopt I/O
 #############
@@ -266,7 +265,6 @@ while (!($stop == $nfiles || $i>=$MAX_IT))
 			}
 		}
 	}
-
 	if ($i%1000000 == 0)
 	{
 		print("Iteraction number $i, CHR $chr, POS $pos\n");
@@ -279,6 +277,8 @@ while (!($stop == $nfiles || $i>=$MAX_IT))
 
 my @header;
 
+##MATRIX output
+###############
 push(@header,">=$_") foreach @filters;
 
 print(join(",","Sharedby",@header),"\n");
@@ -286,6 +286,21 @@ for ($i=1; $i <= $nfiles; ++$i)
 {
 	print(join(",",$i,@{$results[$i]}),"\n");
 }
+
+##Tidy output (i.e., R-style)
+#############################
+
+open(my $ofilehand,">$output_prefix.csv");
+@header=qw(bp mindepth nsamples);
+
+print($ofilehand join(",",@header),"\n");
+for ($i=1; $i<= $nfiles; ++$i)
+{
+	for($j=0; $j< $nfilters; ++$j){
+		print($ofilehand join(",",$results[$i][$j],$filters[$j],$i),"\n");
+	}
+}
+close($ofilehand);
 
 ## Functions
 ############
