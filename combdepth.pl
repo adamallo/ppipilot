@@ -1,5 +1,4 @@
 #!/usr/bin/env perl
-
 use strict;
 use warnings;
 use Getopt::Long qw(GetOptions);
@@ -14,37 +13,29 @@ use List::Util qw(min sum);
 #########
 
 {
-	package slurplikeline;
+	package slurplikeline; ##Oddly enough, the slurp strategy is slower than the regular one, researching on it. 150 vs 216 mins
 	use File::Slurp;
 	use IO::Uncompress::Gunzip qw(gunzip $GunzipError);
 
 	sub new 
 	{
 		my ($class,$filename,$mode) = @_;
-		my $n=0;
-		my $maxi=0;
-		my @lines;
+		my $lines;
+		my $pos=0;
 
 		if (defined $mode && lc $mode eq 'gz')
 		{
-			gunzip $filename => \@lines;
+			gunzip $filename => \$lines;
 		}
 		else
 		{
-			#@lines = read_file($filename); #Not working
-			my $filehandler;
-			open($filehandler,$filename);
-			@lines=<$filehandler>;
-			close($filehandler);
+			$lines = read_file($filename, binmode => ':raw'); #Not working in mac but working on linux
 		}
-
-		$maxi=scalar @lines;
 		
 		my $self = bless { 
 			filename => $filename,
-			n => $n,
-			lines => \@lines,
-			maxi => $maxi
+			lines => $lines,
+			pos => $pos,
 		},$class;
 
 		return $self;
@@ -53,11 +44,24 @@ use List::Util qw(min sum);
 	sub getline
 	{
 		my $self=shift;
-		
-		if ($self->{n} == $self->{maxi}){return undef};
+		my $oldi=$self->{pos};
+		my $i=$oldi;
+		my $c="";
+		my $found=0;
 
-		++$self->{n};
-		return $self->{lines}->[$self->{n}-1];
+		if($oldi < length($self->{lines})-1) #-1 eq Implicit chomp
+		{
+			while($c ne $/)
+			{
+				$c = substr($self->{lines}, $i++,1);
+			}
+			$self->{pos}=$i;	
+			return substr($self->{lines},$oldi,$i-$oldi-1);
+		}
+		else
+		{
+			return undef;
+		}
 	}
 }
 
@@ -65,8 +69,8 @@ use List::Util qw(min sum);
 
 ## Conf
 ############
-my $MAX_IT=400000;
-#my $MAX_IT=4000000000;
+#my $MAX_IT=40000000;
+my $MAX_IT=4000000000;
 
 ## Getopt I/O
 #############
@@ -157,7 +161,7 @@ if ($ref ne "")
 }
 if($dict ne "")
 {
-	open(my $filedict,$dict);
+	open(my $filedict,$dict) or die "The file $dict cannot be read\n";
 	@chrs=grep(/\@SQ/,<$filedict>);
 	foreach my $ichr (@chrs)
 	{
@@ -167,7 +171,7 @@ if($dict ne "")
 }
 elsif($listchrs ne "")
 {
-	open(my $filechrs,$listchrs);
+	open(my $filechrs,$listchrs) or die "The file $listchrs cannot be read\n";
 	@chrs=<$filechrs>;
 	close($filechrs);
 }
@@ -274,7 +278,6 @@ while (!($stop == $nfiles || $i>=$MAX_IT))
 		$chr=$chrs[$nchr];
 	}
 	while($nchrs ==0);
-
 	#$pos=min(@cpos[makeslicefrommask(\@posvalidfilesmask)]); #Equivalent, but a little slower
 	@temp=();
 	for($j=0;$j<scalar $nfiles;++$j)
@@ -285,7 +288,6 @@ while (!($stop == $nfiles || $i>=$MAX_IT))
 		}
 	}
 	$pos=min(@cpos[@temp]);
-	
 	#@posmask=makemask(\@cpos,$pos);#Equivalent, but a little slower
 	@posmask=(0) x $nfiles;	
 	for ($j=0; $j<$nfiles; ++$j)
@@ -355,6 +357,11 @@ while (!($stop == $nfiles || $i>=$MAX_IT))
 		print("Iteraction number $i, CHR $chr, POS $pos\n");
 	}
 	++$i;
+}
+
+if ($i>=$MAX_IT)
+{
+	die "ERROR: Maximum number of iteractions reached. This is not expected to happen and the output will be truncated. You can modify the variable \$MAX_IT in the source code to increase the number of iteractions, but it has been set so that a whole human genome can be parsed without any problems. Please, check that the input format is correct before performing the suggested modification in the source code\n";
 }
 
 # Print results
